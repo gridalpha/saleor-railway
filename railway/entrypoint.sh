@@ -64,35 +64,37 @@ case "$SALEOR_ROLE" in
 
   worker)
     : "${PORT:=8080}"
-    wait_for_schema
-    # Celery's default concurrency is the *host's* core count, which on Railway is 48 —
-    # 48 prefork children of a Django app is an instant OOM. Pin it and expose the knob.
     node="${CELERY_NODE_NAME:-saleor-worker@$HOSTNAME}"
     export HEALTHD_MODE=worker
     export HEALTHD_CELERY_NODE="$node"
+    # Start answering the health check before waiting on the schema — on a first deploy
+    # the wait is longer than Railway's health check window.
+    python3 /app/railway/healthd.py &
+    health_pid=$!
+    wait_for_schema
+    # Celery's default concurrency is the *host's* core count, which on Railway is 48 —
+    # 48 prefork children of a Django app is an instant OOM. Pin it and expose the knob.
     log "starting the Celery worker as ${node}"
     celery --app saleor.celeryconf:app worker \
       --loglevel="${CELERY_LOGLEVEL:-info}" \
       --concurrency="${CELERY_CONCURRENCY:-4}" \
       -n "$node" &
-    role_pid=$!
-    python3 /app/railway/healthd.py &
-    supervise "$role_pid" "$!"
+    supervise "$!" "$health_pid"
     ;;
 
   beat)
     : "${PORT:=8080}"
-    wait_for_schema
     export HEALTHD_MODE=beat
+    python3 /app/railway/healthd.py &
+    health_pid=$!
+    wait_for_schema
     log "starting the Celery beat scheduler"
     # DatabaseScheduler keeps the schedule in Postgres, so beat needs no local state and
     # a redeploy never loses it.
     celery --app saleor.celeryconf:app beat \
       --loglevel="${CELERY_LOGLEVEL:-info}" \
       --scheduler saleor.schedulers.schedulers.DatabaseScheduler &
-    role_pid=$!
-    python3 /app/railway/healthd.py &
-    supervise "$role_pid" "$!"
+    supervise "$!" "$health_pid"
     ;;
 
   *)
