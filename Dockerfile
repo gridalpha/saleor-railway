@@ -27,7 +27,10 @@ RUN chmod +x /app/railway/*.sh \
   && bash -n /app/railway/rsa_key.sh \
   && python3 -m compileall -q /app/railway_settings.py /app/railway/
 
-ENV DJANGO_SETTINGS_MODULE=railway_settings \
+# /app is the WORKDIR, but a script run by absolute path gets its own directory on
+# sys.path instead — railway_settings lives here, so pin it.
+ENV PYTHONPATH=/app \
+    DJANGO_SETTINGS_MODULE=railway_settings \
     SALEOR_ROLE=api
 
 EXPOSE 8000
